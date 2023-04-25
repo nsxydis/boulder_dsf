@@ -1,6 +1,7 @@
-# dsf_NYPD
-Data Science as a Field NYPD shooting rmd file
+# boulder_dsf
+Data Science as a Field Final Project
 
 This repository is for the Data Science as a Field Course.
-The repository will store the R markdown file and knitted html/pdf files
-for the Final Project.
+There are two parts to this project and they will be placed in separate folders:
+1) NYPD Shooting Incident Report
+2) COVID-19 Report
