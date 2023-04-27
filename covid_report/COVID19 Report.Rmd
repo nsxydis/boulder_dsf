@@ -15,8 +15,13 @@ To run this R Markdown file, you must have the following packages installed:
 library('tidyverse')
 ```
 
+# Introduction
+We will be looking at the global COVID-19 data to see if there are any
+correlations between number of COVID cases versus a country's population 
+density. We will also look at trends between cases and deaths.
+
 # Data Source
-This report looks as data provided by Johns Hopkins, which can be found here:
+The data was data provided by Johns Hopkins, and can be found here:
 https://github.com/CSSEGISandData/COVID-19
 
 The data looks a COVID19 cases over time, both in the US and around the world.
