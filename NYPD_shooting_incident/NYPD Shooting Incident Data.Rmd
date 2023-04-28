@@ -1,0 +1,290 @@
+---
+title: "NYPD Shooting Data"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# NYPD Shooting Incident Data (Historic)
+This data looks at the shootings that occurred in New York City between 2006 and 2021 (inclusive). The data includes the following information:
+
+* INCIDENT_KEY
+* OCCUR_DATE
+* OCCUR_TIME
+* BORO
+* PRECINCT
+* JURISDICTION_CODE
+* LOCATION_DESC
+* STATISTICAL_MURDER_FLAG
+* PERP_AGE_GROUP
+* PERP_SEX
+* PERP_RACE
+* VIC_AGE_GROUP
+* VIC_SEX
+* VIC_RACE
+* X_COORD_CD
+* Y_COORD_CD
+* Latitude
+* Longitude
+* Lon_Lat
+
+
+## Data Source
+To download csv file:
+https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD
+
+Source location (for reference and other data formats):
+https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic
+
+Note the file name used in this markdown is:
+NYPD_Shooting_Incident_Data_\_Historic\_.csv
+
+To recreate this analysis, make sure you use the same file name (noting the 
+extra underscore between "Data" and "Historic" as well as the one at the end).
+
+```{r input, message=FALSE}
+library(tidyverse)
+library(knitr)
+df = read_csv("./NYPD_Shooting_Incident_Data__Historic_.csv")
+```
+
+## Clean up the data
+For this analysis we'll be looking at the age of shooting victims and the date
+that incidents occurred. This will be used for further analysis on the trends
+of victim age over time.
+
+As part of the tidying process, we'll remove "UNKNOWN" entries for the 
+VIC_AGE_GROUP column and transform the data to a factor. Additionally, we'll 
+convert the OCCUR_DATE column to a date variable named Date. Furthermore we'll
+add a character column to specify which age category a age group is in.
+
+We will add a column named Year which is just the year that a murder took place.
+
+We will add an integer "Victim" that will be used to count the victims.
+
+```{r clean}
+# Convert the occur date to a date data type named Date
+df = df %>% mutate(Date = mdy(OCCUR_DATE))
+
+# Add season to the data
+df$Season = cut(as.numeric(format(df$Date, "%m")),
+                     c(0, 2, 5, 8, 11, 12),
+                     labels = c("Winter", "Spring", "Summer", "Fall", "Winter"))
+
+# PERP DATA FRAME
+# Remove Unknown/blank and other error perp age entries
+perp = df %>% filter(PERP_AGE_GROUP != "UNKNOWN")
+perp = perp %>% filter(PERP_AGE_GROUP != "1020")
+perp = perp %>% filter(PERP_AGE_GROUP != "940")
+perp = perp %>% filter(PERP_AGE_GROUP != "224")
+perp = perp %>% filter(PERP_AGE_GROUP != "")
+# Convert perp ages to a factor
+perp = perp %>% mutate(Perp_Age_Group = as.factor(PERP_AGE_GROUP))
+# Add the text name of ages
+age_groups = c("Teen", "Young Adult", "Adult", "Senior Adult", "Elderly")
+# Add an age group's name
+perp$Age_Category = ifelse(perp$PERP_AGE_GROUP == "<18", "Teen",
+                  ifelse(perp$PERP_AGE_GROUP == "18-24", "Young Adult",
+                  ifelse(perp$PERP_AGE_GROUP == "25-44", "Adult",
+                  ifelse(perp$PERP_AGE_GROUP == "45-64", "Senior Adult",
+                  ifelse(perp$PERP_AGE_GROUP == "65+", "Elderly", "Error")))))
+
+# VICTIM DATA FRAME
+# Remove Unknown victim age entries
+df = df %>% filter(VIC_AGE_GROUP != "UNKNOWN")
+# Convert victim ages to a factor
+df = df %>% mutate(Victim_Age_Group = as.factor(VIC_AGE_GROUP))
+# Add the text name of victim ages
+age_groups = c("Teen", "Young Adult", "Adult", "Senior Adult", "Elderly")
+# Add an age group's name
+df$Age_Category = ifelse(df$VIC_AGE_GROUP == "<18", "Teen",
+                  ifelse(df$VIC_AGE_GROUP == "18-24", "Young Adult",
+                  ifelse(df$VIC_AGE_GROUP == "25-44", "Adult",
+                  ifelse(df$VIC_AGE_GROUP == "45-64", "Senior Adult",
+                  ifelse(df$VIC_AGE_GROUP == "65+", "Elderly", "Error")))))
+
+# Only keep the necessary columns
+keep = c("INCIDENT_KEY", "Date", "OCCUR_TIME", "Victim_Age_Group", "Age_Category", "Season")
+filtered = df[keep]
+
+# Add a column for the year (as a number)
+filtered = filtered %>% mutate(Year = year(Date))
+
+# Add a column to count victims by
+filtered = filtered %>% mutate(Victim = 1)
+```
+
+
+## Victim Age Breakdown
+
+We will first look at the age groups of victims. See below for a table showing
+the number of victims in each age group across all of the data.
+
+The age groups are classified as follows:  
+Teen: Less than 18 years old  
+Young Adult: Between 18 and 24 years old  
+Adult: Between 25 and 44 years old  
+Senior Adult: Between 45 and 64 years old  
+Elderly: 65 or more years old
+
+Note that unknown victim ages are excluded from this summary.
+
+```{r age, message=FALSE}
+# Find the date range of the data
+startDate = min(filtered$Date)
+endDate = max(filtered$Date)
+string = paste0("This data covers the following date range: ", startDate,
+             " to ", endDate)
+print(noquote(string))
+
+ages = filtered %>%
+  group_by(Victim_Age_Group, Age_Category) %>%
+  summarize(Victims = sum(Victim))
+
+kable(ages)
+```
+
+### Initial takeaways
+From the first breakdown of the data we can see that a majority of shooting 
+victims are in the Young Adult and Adult category. It's interesting to note that
+Young Adult ages cover a 7 year span (18 to 24) whereas Adults cover a 20 year
+span (25-44) but the number of victims in either category are relatively close. 
+It would be interesting to pair this data against the age demographics for New 
+York City to see if the proportions of each age group are similar.
+
+## Perp Age Breakdown
+```{r perp_age, message=FALSE}
+# Make a data frame just with the relevant columns
+keep = c("INCIDENT_KEY", "Date", "OCCUR_TIME", "Perp_Age_Group", "Age_Category", "Season")
+perp_filtered = perp[keep]
+# Add a column to count victims by
+perp_filtered = perp_filtered %>% mutate(Perpetrator = 1)
+
+# Plot the table
+perp_ages = perp_filtered %>%
+  group_by(Perp_Age_Group, Age_Category) %>%
+  summarize(Perpetrators = sum(Perpetrator))
+
+kable(perp_ages)
+```
+
+
+## Look at the age relationship between perpetrators and victims 
+``` {r merge}
+merged_df = merge(filtered, perp_filtered, by = "INCIDENT_KEY")
+library(dplyr)
+library(ggplot2)
+
+perp_count = merged_df %>%
+  group_by(Perp_Age_Group, Victim_Age_Group) %>%
+  summarise(Count = n())
+
+# Create the grouped bar chart
+ggplot(perp_count, aes(x = Perp_Age_Group, y = Count, fill = Victim_Age_Group)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(x = "Perpetrator Age Group", y = "Count of Perpetrators", 
+       title = "Victim Age Group versus Perpetrator Age Group") +
+  scale_fill_discrete(name = "Victim Age Group") +
+  theme_bw()
+```
+
+## Graphical Analysis
+Next we'll look at a few graphical representations of the data.  
+  1) Count of victims separated by Age Category over time in years  
+  2) Time of day a shooting occurred
+
+### Shooting Victims Age Category Over Time
+```{r years, message=FALSE}
+years = filtered %>%
+  group_by(Year, Victim_Age_Group, Age_Category) %>%
+  summarize(Victims = sum(Victim))
+
+p = ggplot(years, aes(x = Year, y = Victims)) +
+  ggtitle("Number of New York Shooting Incidents Separated by Age Categories") + 
+  xlab("Year") + 
+  ylab("Number of Shooting Incidents")
+
+p + geom_line(aes(color = Age_Category))
+```
+
+When looking at the age groups of victims over time we see some changes in
+trends. Data collection began in 2006 and we see that the number of Young Adult
+victims has diverged from Adult starting around 2014.
+
+More strikingly, we see that across all groups the number of victims increased
+in 2020 and persisted into 2021. This could be another point of reference to
+investigate further. It is possible this could be related to COVID-19 when
+people were forced into lock downs. New York City was hit particularly hard
+during the start of the pandemic. To make claims like this we would need further
+data such as police reports that define the relationship between shooters and
+victims. 
+
+### Time of Day Shootings Occured
+``` {r histogram, message=FALSE}
+# Give the OCCUR_TIME a fake date to allow plotting
+filtered$OCCUR_TIME <- as.POSIXct(paste("1970-01-01", format(filtered$OCCUR_TIME, "%H:%M:%S")))
+
+# Make our plot and adjust the labels 
+p = ggplot(filtered, aes(x = OCCUR_TIME)) + 
+  ggtitle("Distribution of Shootings versus Time of Day") + 
+  xlab("Time of Shooting Incident (Military Time)") + 
+  ylab("Number of Incidents")
+p + geom_histogram(binwidth = 60*60, fill = "lightblue", color = "black") +
+                    scale_x_datetime(date_labels = "%H%M", date_breaks = "2 hour") +
+                    theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))
+
+```
+
+This chart takes a look at all of the data and focuses on what time shootings
+happen. The histogram makes a bi-modal distribution with peaks around 1AM (0100)
+and 11PM (2300). One of the easy takeaways would be that most shootings don't
+take place during working hours. This is probably because a majority of people
+are working at their jobs and not out and about. Another indication could be
+that shootings are less likely to take place while there's daylight. A further
+analysis could break down the data into seasons and the approximate sunrise and
+sunset times to make groups such as: Before Sunrise, Dawn, Daylight, Dusk, After
+Sunset.
+
+### Season Shootings Occurred
+``` {r seasons}
+seasons = filtered %>%
+  group_by(Year, Season) %>%
+  summarize(Victims = sum(Victim))
+ggplot(seasons, aes(x = Year, y = Victims, group = Season, color = Season)) +
+  geom_line() +
+  labs(x = "Date", y = "Incidents", title = "Incidents by Season") +
+  scale_color_discrete(name = "Season", labels = c("Winter", "Spring", "Summer", "Fall")) +
+  theme_bw()
+```
+
+## Bias and mitigation
+There are many sources of bias when looking at data and this data is no
+different. For starters, it's collected by the police department so we are
+relying on their integrity and diligence in reporting the data correctly.
+
+Another potential bias comes from the analyzer of the data. It wouldn't be hard
+to gloss over the data and start making claims that were ethically dubious. An
+example could be looking at the age category of perpetrators and making claims
+that one age group is inherently more dangerous than another.
+
+As an attempt to mitigate biases, I tried to present the data as it was and
+instead of making sudden conclusions, offer suggestions of other data that could
+be looked at or analyzed. Though in an effort to reduce bias there is a somewhat
+ironic introduction of bias as well. Being too tentative when looking at data
+could shield valid conclusions from the data. So, that is something to keep in
+mind as well.
+
+## Conclusions
+This dataset has a lot of information. But with all good information comes
+questions that need more information. I think further analysis could offer some
+interesting ideas. Maybe by looking at more data like shooting occurrences and
+time of day after incorporating seasonal sunrise and sunset times we would see
+a trend that less shootings occur during well lit hours. A possible experiment
+could follow by increasing illumination during dark hours in more dangerous
+locations to see if it has an impact on the number of shootings or just crime
+in general.
