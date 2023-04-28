@@ -1,0 +1,231 @@
+---
+title: "COVID19 Report"
+output: html_document
+date: "2023-04-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Package Dependencies
+To run this R Markdown file, you must have the following packages installed:
+  1) tidyverse
+  
+``` {r load}
+library('tidyverse')
+```
+
+# Introduction
+We will be looking at the global COVID-19 data to see if there are any
+correlations between number of COVID cases versus a country's population 
+density. We will also look at trends between cases and deaths.
+
+
+# Data Source
+The data was data provided by Johns Hopkins, and can be found here:
+https://github.com/CSSEGISandData/COVID-19
+
+The data looks a COVID19 cases over time, both in the US and around the world.
+Specifically, we will evaluate the time series data which uses the following
+folder path, starting from the downloaded zip file:
+csse_covid_19_data\\csse_covid_19_time_series
+
+And the following files within that folder:
+  1) time_series_covid19_confirmed_global
+  2) time_series_covid19_confirmed_US
+  3) time_series_covid19_deaths_global
+  4) time_series_covid19_deaths_US
+  
+Additionally, we acquired population density data from the following site:
+https://data.worldbank.org/indicator/EN.POP.DNST
+
+The following csv file was used from the previous site:
+  1) API_EN.POP.DNST_DS2_en_csv_v2_5358697.csv
+  
+# Import the data
+``` {r import}
+url = "https://raw.githubusercontent.com/nsxydis/boulder_dsf/main/covid_report/time_series_covid19_confirmed_global.csv"
+df_confirmed_global = read.csv(url)
+
+url = "https://raw.githubusercontent.com/nsxydis/boulder_dsf/main/covid_report/time_series_covid19_confirmed_US.csv"
+df_confirmed_us = read.csv(url)
+
+url = "https://raw.githubusercontent.com/nsxydis/boulder_dsf/main/covid_report/time_series_covid19_deaths_global.csv"
+df_deaths_global = read.csv(url)
+
+url = "https://raw.githubusercontent.com/nsxydis/boulder_dsf/main/covid_report/time_series_covid19_deaths_US.csv"
+df_deaths_us = read.csv(url)
+
+url = "https://raw.githubusercontent.com/nsxydis/boulder_dsf/main/covid_report/API_EN.POP.DNST_DS2_en_csv_v2_5358697.csv"
+population_density= read.csv(url, skip = 4)
+```
+
+# Tidying the data
+``` {r tidy}
+# Make the global deaths data frame vertical instead of wide
+global_deaths = df_deaths_global %>%
+  pivot_longer(cols = -c("Province.State", "Country.Region", Lat, Long),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(-c(Lat, Long))
+
+# Group the deaths data by Country.Region
+global_deaths = global_deaths %>%
+  group_by(Country.Region, date) %>%
+  summarize(total_deaths = sum(deaths))
+
+# Make the global cases data frame vertical instead of wide
+global_cases = df_confirmed_global %>%
+  pivot_longer(cols = -c("Province.State", "Country.Region", Lat, Long),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(-c(Lat, Long))
+
+# Group the cases data by Country.Region
+global_cases = global_cases %>%
+  group_by(Country.Region, date) %>%
+  summarize(total_cases = sum(cases))
+
+# Merge the global deaths and cases data frames
+cases_deaths = merge(global_deaths, global_cases, 
+               by=c("Country.Region", 'date'))
+
+# Convert date to a better format
+cases_deaths = cases_deaths %>%
+  mutate(date = sub("X", "", date))
+cases_deaths = cases_deaths %>%
+  mutate(date = as.Date(date, "%m.%d.%y"))
+
+# Make a summary of global rates
+global_rate = cases_deaths %>%
+  group_by(date) %>%
+  summarize(total_cases = sum(total_cases),
+            total_deaths = sum(total_deaths),
+            ratio = sum(total_deaths) / sum(total_cases))
+
+# Rename the Country.Name column
+names(population_density)[names(population_density) == "Country.Name"] = "Country.Region"
+
+# Use the 2020 population density value
+# Note this is the most recent value available at the time
+# Note density is number of people per square kilometer
+keep = c('Country.Region', 'X2020')
+density = subset(population_density, select = keep)
+
+# Summary of cases versus deaths by Country
+country_rates = cases_deaths %>%
+  group_by(Country.Region) %>%
+  summarize(total_cases = sum(total_cases),
+            total_deaths = sum(total_deaths),
+            ratio = sum(total_deaths) / sum(total_cases))
+
+# Add the population density for each location
+density_rate = merge(country_rates, density,
+                     by = "Country.Region")
+```
+In the above code we combined the different global data sets into data frames.
+We also transformed the date column into an actual date format. Additionally we 
+combined some of the data sets to aid in the following graphing and modeling.
+
+# Graphical Analysis
+``` {r graphing}
+# Plot the number of deaths versus cases over time
+p1 = ggplot(global_rate, aes(x = date)) + 
+  geom_line(aes(y = total_cases, color = "Total Cases")) + 
+  scale_color_manual(values = c("Total Cases" = "blue")) + 
+  xlab("Date") +
+  ylab("Count") +
+  ggtitle("Global Cummulative COVID-19 Cases over Time")
+  
+p2 = ggplot(global_rate, aes(x = date)) + 
+  geom_line(aes(y = total_deaths, color = "Total Deaths")) + 
+  scale_color_manual(values = c("Total Deaths" = "red")) +
+  xlab("Date") +
+  ylab("Count") +
+  ggtitle("Global Cummulative COVID-19 Deaths over time")
+
+p3 = ggplot(global_rate, aes(x = date)) + 
+  geom_line(aes(y = ratio, color = "Ratio: Deaths/Cases")) + 
+  scale_color_manual(values = c("Ratio: Deaths/Cases" = "black")) +
+  xlab("Date") +
+  ylab("Deaths per Case") +
+  ylim(0, NA) +
+  ggtitle("Global COVID-19 Deaths per Cases over time")
+
+p1
+p2
+p3
+```
+All the above graphs are based off cumulative data, meaning the totals from each
+date are added to the next date (so they will only increase). Comparing the
+number of cases to deaths over time we see that the plots appear to be similar -
+we will model the ratio between those two values in the next section. We also
+looked at the ratio of deaths versus the number of cases. This graph is a little
+more interesting - we see that the number of deaths per cases spiked in the
+beginning of the pandemic and tapered off sharply. This could be due to the way
+COVID-19 spreads so quickly and the fact there were no vaccines at the time.
+Once the vaccines were introduced (in the US this started around Nov2020) we see
+that the ratio of deaths to cases remains flat and then has another tapering off
+after 2022. A possible reason for this would be that after 2022 a majority of
+the population had either been vaccinated or infected (or both). 
+
+# Modeling
+``` {r model}
+# Number of cases versus number of deaths
+ggplot(density_rate, aes(x = log10(total_cases), y = log10(total_deaths))) + 
+  geom_point() +
+  geom_smooth(method = "lm", color = "blue") +
+  xlab("log10(Total Cases)") + 
+  ylab("log10(Total Deaths)") +
+  ggtitle("Global Totals: Cases versus Deaths")
+
+# Number of deaths versus population density
+ggplot(density_rate, aes(x = log10(X2020), y = log10(total_cases))) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "green") +
+  xlab("log10(Population Density)") + 
+  ylab("log10(Total Cases)") + 
+  ggtitle("Global Totals: Population Density versus Number of Cases")
+```
+The following graphs look at the total number of cases and deaths from the
+collected data. To make the graphs easier to read, we looked at the log base 10
+values of both total cases and total deaths. Each point on the graph represents
+a country. It's quite evident that there is a strong correlation to the number
+of deaths versus number of cases and it appears to follow a linear model.
+
+However, if we recall from one of the ratio of deaths to cases over time, we
+noted the number of deaths per case decreased over time. It would be interesting
+to generate this model on an annual basis to see if the linear trend holds.
+
+We also gathered population density information for each country and used the
+most recent data that was available at the time (2020). In this data set, we
+have the number of people per square kilometer of land of each country. In the
+second graph, we again use the log base 10 scale on both the X-axis (Population
+Density) and Y-axis (Total Cases). Here we see that the population density does
+not appear to be correlated with the total number of cases in a country. This
+could be because of the transmission rate of the COVID-19 virus. Since it is
+highly infectious, it is able to be transmitted regardless of the different 
+population densities of the countries. If the virus was less transmissible, we
+would expect to see a lower number of cases in countries with a lower population
+density.
+
+# Potential Biases
+The data we looked at is public information that is based off the data that is
+reported by different government bodies. Some countries may have inaccurate data
+or falsified/omitted data that could result in improper conclusions. 
+
+Some of the analysis done with population density could be improved by modeling
+it against the number of cases per population of the country. Another option
+would be to model the data on an annual or seasonal basis as the rate of
+infection varies as the population is given vaccinations and recovers from
+infections.
+
+# Conclusions
+From this data the clearest conclusion is the strong positive correlation 
+between number of cases and the number of deaths. Taking these findings we could
+look into the affects that certain regulations like masking, lock downs, and 
+social-distancing had on the spread of the virus. A good subject for this study 
+would be to look at the US and each state, as each had highly varied approaches 
+to the pandemic. Identifying which efforts are most and least effective would be
+beneficial during the next pandemic we face. 
